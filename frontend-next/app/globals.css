@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Font loaded via next/font/google in layout.tsx — no @import needed */
+
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --color-primary: #2563eb;
+    --color-medical-teal: #0d9488;
+    --color-medical-green: #059669;
+    --sidebar-width: 260px;
+  }
+
+  html { scroll-behavior: smooth; }
+  body { font-family: var(--font-montserrat), system-ui, sans-serif; background-color: #f9fafb; color: #111827; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #f3f4f6; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #1e40af, #0d9488);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .glass-dark {
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .medical-card {
+    @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-6 transition-all hover:shadow-md;
+  }
+
+  .btn-primary {
+    @apply bg-[#FF8CA0] hover:bg-[#e87a8e] text-white font-semibold px-6 py-3 rounded-xl
+           transition-all duration-200 shadow-sm hover:shadow-md active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-3 rounded-xl
+           border border-gray-200 transition-all duration-200 hover:border-gray-300;
+  }
+
+  .btn-teal {
+    @apply bg-teal-500 hover:bg-teal-600 text-white font-semibold px-6 py-3 rounded-xl
+           transition-all duration-200 shadow-sm hover:shadow-md active:scale-95;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#FF8CA0]
+           focus:ring-2 focus:ring-[#FF8CA0]/20 outline-none transition-all text-gray-900
+           placeholder-gray-400 bg-gray-50;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium
+           transition-colors cursor-pointer;
+  }
+
+  .sidebar-link-active {
+    @apply bg-[#FF8CA0]/10 text-[#c0566d];
+  }
+
+  .sidebar-link-inactive {
+    @apply text-gray-600 hover:bg-gray-100 hover:text-gray-900;
+  }
+
+  /* Heartbeat line animation */
+  .heartbeat-line {
+    stroke-dasharray: 300;
+    stroke-dashoffset: 300;
+    animation: draw-line 3s ease-in-out infinite;
+  }
+
+  @keyframes draw-line {
+    0%   { stroke-dashoffset: 300; }
+    50%  { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: -300; }
+  }
+}

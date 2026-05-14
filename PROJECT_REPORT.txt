@@ -1,0 +1,623 @@
+================================================================================
+  HEALTHCAREAI — UNIFIED AGENTIC SYSTEM
+  Project Knowledge Report
+  Generated: 2026-04-26
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. SYSTEM OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HealthcareAI is a full-stack AI-powered healthcare assistant that combines a
+Next.js 14 frontend with a FastAPI backend, 5 specialised LangChain agents,
+a RAG (Retrieval-Augmented Generation) medical knowledge base, and multi-layer
+persistent storage.
+
+TECH STACK
+  Frontend  : Next.js 14 App Router, TypeScript, Tailwind CSS, Zustand
+  Backend   : FastAPI (Python), SQLAlchemy async (PostgreSQL)
+  LLM       : Anthropic Claude Sonnet 4.6 (agents) + Haiku 4.5 (intent router)
+  RAG       : BioBERT (local 768-dim embeddings) + Pinecone (483k PubMed vectors)
+               + Cross-Encoder reranker (ms-marco-MiniLM-L-6-v2)
+  Agent SDK : LangChain 0.3.x (create_tool_calling_agent + AgentExecutor)
+  DB 1      : PostgreSQL — users, appointments, blog posts, audit logs, summaries
+  DB 2      : AWS DynamoDB — chat sessions + messages (free tier)
+  Payments  : Razorpay (mock mode active; real keys configurable)
+  Email     : SMTP (mock fallback active; real SMTP keys configurable)
+  Auth      : JWT (access tokens) + optional Google OAuth
+  Container : Docker Compose (frontend + backend + postgres services)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. ARCHITECTURE DIAGRAM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Browser (Next.js 14 — :3000)
+      │  REST API + JWT
+      ▼
+  FastAPI Backend (:8000)
+      │
+      ├── Routers: auth, chat, appointments, admin, analytics, blog, doctors
+      │
+      └── MasterAgent (intent classifier → route)
+              │
+              ├── Haiku 4.5 Intent Classifier
+              │       classifies: medical | appointment | reputation |
+              │                   content | notification | general
+              │
+              ├── Agent 1 — Medical Guidance (agent1_medical.py)
+              │       • BioBERT embed query (768-dim, local model)
+              │       • Pinecone query → top-20 candidates
+              │       • Cross-encoder reranker → top-5 chunks
+              │       • Claude Sonnet → citation-grounded response
+              │       • Tools: query_medical_knowledge, check_emergency
+              │
+              ├── Agent 2 — Appointment Booking (agent2_appointment.py)
+              │       • Books appointments via tools
+              │       • Persists to PostgreSQL via crud.py
+              │       • Tools: check_available_slots, create_appointment_booking,
+              │                 process_mock_payment
+              │
+              ├── Agent 3 — Reputation Management (agent3_reputation.py)
+              │       • Fetches reviews from PostgreSQL
+              │       • AI-generated replies for negative reviews
+              │       • Flags high-risk review content
+              │       • Tools: get_reviews, generate_reply, flag_review
+              │
+              ├── Agent 4 — Content Generation (agent4_content.py)
+              │       • Generates blog posts, social media content
+              │       • Fetches health news via NewsAPI
+              │       • Saves drafts to PostgreSQL blog_posts table
+              │       • Tools: fetch_health_news, generate_blog_post,
+              │                 save_blog_post
+              │
+              └── Agent 5 — Drug/Treatment Notifications (agent5_notification.py)
+                      • Finds relevant patients by disease keyword
+                      • Generates email templates for new treatments
+                      • Creates notification campaign (pending admin approval)
+                      • Tools: find_relevant_patients, generate_notification,
+                                create_campaign
+
+  Memory Layer
+      ├── In-process session dict (session_memory.py) — fast, per-request
+      └── PostgreSQL daily_summaries — 5-day rolling LLM summaries
+
+  Storage Layer
+      ├── PostgreSQL — all structured business data
+      └── DynamoDB  — chat sessions + messages
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. POSTGRESQL DATABASE TABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TABLE: users
+  id              INTEGER PK
+  username        VARCHAR(100) UNIQUE
+  email           VARCHAR(255) UNIQUE
+  hashed_password VARCHAR(255)
+  full_name       VARCHAR(255)
+  age             INTEGER
+  gender          VARCHAR(20)
+  phone           VARCHAR(20)
+  role            ENUM(patient, doctor, admin)
+  is_active       BOOLEAN
+  created_at      TIMESTAMP
+  updated_at      TIMESTAMP
+
+TABLE: appointments
+  id                 INTEGER PK
+  patient_id         FK → users.id
+  doctor_id          FK → users.id (nullable)
+  department         VARCHAR(100)
+  appointment_time   TIMESTAMP
+  symptoms_summary   TEXT
+  status             ENUM(pending, confirmed, cancelled, completed, no_show)
+  payment_status     ENUM(pending, paid, failed, refunded)
+  payment_reference  VARCHAR(200)
+  confirmation_link  VARCHAR(500)
+  feedback           TEXT
+  feedback_rating    INTEGER (1–5)
+  rescheduled_from   FK → appointments.id (nullable)
+  created_at         TIMESTAMP
+  updated_at         TIMESTAMP
+
+TABLE: reschedule_requests
+  id                         INTEGER PK
+  appointment_id             FK → appointments.id
+  patient_id                 FK → users.id
+  requested_department       VARCHAR(100)
+  requested_time             TIMESTAMP
+  requested_symptoms_summary TEXT
+  reason                     TEXT
+  status                     ENUM(pending, approved, rejected)
+  admin_notes                TEXT
+  resolved_by                FK → users.id (nullable)
+  resolved_at                TIMESTAMP
+  created_at                 TIMESTAMP
+
+TABLE: symptoms
+  id            INTEGER PK
+  user_id       FK → users.id
+  session_id    VARCHAR(100)
+  symptoms_list JSON    (e.g. ["chest pain", "fever"])
+  raw_text      TEXT
+  severity      VARCHAR(50)  (mild / moderate / severe)
+  is_emergency  BOOLEAN
+  ai_response   TEXT
+  created_at    TIMESTAMP
+
+TABLE: reviews
+  id               INTEGER PK
+  platform         VARCHAR(50)  (google / facebook / etc.)
+  reviewer_name    VARCHAR(200)
+  rating           FLOAT
+  review_text      TEXT
+  review_date      TIMESTAMP
+  category         ENUM(good, moderate, high_risk)
+  ai_reply         TEXT
+  reply_approved   BOOLEAN
+  reply_posted     BOOLEAN
+  flagged_keywords JSON
+  created_at       TIMESTAMP
+
+TABLE: blog_posts
+  id           INTEGER PK
+  title        VARCHAR(500)
+  content      TEXT
+  post_type    VARCHAR(50)   (blog / social_media / website)
+  platform     VARCHAR(100)  (website / twitter / linkedin)
+  status       ENUM(draft, pending, approved, rejected, published)
+  approved_by  FK → users.id (nullable)
+  approved_at  TIMESTAMP
+  published_at TIMESTAMP
+  tags         JSON
+  created_at   TIMESTAMP
+  updated_at   TIMESTAMP
+
+TABLE: notification_campaigns
+  id               INTEGER PK
+  disease_name     VARCHAR(200)
+  treatment_title  VARCHAR(500)
+  treatment_details TEXT
+  email_template   TEXT
+  status           ENUM(pending, approved, sent, failed)
+  approved_by      FK → users.id (nullable)
+  approved_at      TIMESTAMP
+  sent_count       INTEGER
+  created_at       TIMESTAMP
+
+TABLE: notification_logs
+  id          INTEGER PK
+  campaign_id FK → notification_campaigns.id
+  patient_id  FK → users.id
+  email       VARCHAR(255)
+  status      ENUM(pending, approved, sent, failed)
+  sent_at     TIMESTAMP
+  error_msg   TEXT
+
+TABLE: daily_summaries  (Memory System)
+  id                INTEGER PK
+  user_id           FK → users.id
+  summary_date      TIMESTAMP
+  summary_text      TEXT
+  interaction_count INTEGER
+  agents_used       JSON
+  created_at        TIMESTAMP
+
+TABLE: audit_logs
+  id          INTEGER PK
+  user_id     FK → users.id (nullable)
+  action      VARCHAR(200)
+  resource    VARCHAR(200)
+  resource_id INTEGER
+  details     JSON
+  ip_address  VARCHAR(50)
+  created_at  TIMESTAMP
+
+TABLE: chat_sessions
+  id             INTEGER PK
+  session_id     VARCHAR(100) UNIQUE
+  user_id        FK → users.id
+  started_at     TIMESTAMP
+  last_active    TIMESTAMP
+  message_count  INTEGER
+  agents_invoked JSON
+
+TABLE: chat_messages
+  id             INTEGER PK
+  session_id_fk  FK → chat_sessions.id
+  role           VARCHAR(20)  (user / assistant / system)
+  content        TEXT
+  agent_used     VARCHAR(50)
+  metadata       JSON
+  created_at     TIMESTAMP
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. AWS DYNAMODB TABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TABLE: healthcare_chat_sessions
+  session_id     (PK, String)   — UUID
+  user_id        (Number)
+  title          (String)       — first 60 chars of first user message
+  started_at     (String ISO)
+  last_active    (String ISO)
+  message_count  (Number)
+  agents_invoked (List)
+
+TABLE: healthcare_chat_messages
+  message_id     (PK, String)   — UUID
+  session_id     (GSI sort key) — links to session
+  role           (String)       — user | assistant
+  content        (String)
+  agent_used     (String)
+  metadata       (Map)          — includes rag_sources for medical messages
+  created_at     (String ISO)
+
+NOTE: DynamoDB is used for chat history persistence (free tier: 25 GB, 25 RCU/WCU
+permanently free). PostgreSQL stores structured business data. Both are auto-created
+at application startup via the lifespan handler in main.py.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. API ENDPOINTS — COMPLETE LIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AUTH  (prefix: /api/auth)
+  POST   /register               Register new user (patient/doctor/admin)
+  POST   /login                  JWT login → {access_token}
+  GET    /me                     Get current user profile
+  PATCH  /me                     Update profile (name, age, gender, phone)
+  POST   /google                 Google OAuth login/register
+  POST   /refresh                Refresh JWT token
+
+CHAT  (prefix: /api/chat)
+  POST   /message                Send message → MasterAgent → AI response
+  GET    /sessions               List all sessions for current user
+  DELETE /sessions/{id}          Delete session + all its messages
+  GET    /history/{id}           Load messages for a session (from DynamoDB)
+  POST   /session/{id}/summarise Trigger 5-day rolling summary
+
+APPOINTMENTS  (prefix: /api/appointments)
+  POST   /book                   Patient books appointment
+  POST   /razorpay/create-order  Create Razorpay payment order
+  POST   /razorpay/verify        Verify payment signature + confirm appointment
+  GET    /my                     List patient's own appointments
+  GET    /{id}                   Get single appointment (patients: own only)
+  POST   /{id}/reschedule        Patient submits reschedule request (→ admin approval)
+  GET    /my-reschedule-requests Patient views all their reschedule requests
+  POST   /{id}/cancel            Cancel appointment (patient: own; admin: any)
+  POST   /{id}/feedback          Submit feedback + rating (1–5)
+  PUT    /{id}/status            Doctor/admin updates outcome (showed_up/no_show/cancelled)
+
+ADMIN  (prefix: /api/admin)  [requires admin role]
+  GET    /users                  List all users (optional ?role= filter)
+  GET    /appointments           List all appointments across all patients
+  PATCH  /appointments/{id}      Edit appointment (department/time/symptoms/status)
+  DELETE /appointments/{id}      Hard-delete appointment record
+  GET    /reschedule-requests    List reschedule requests (default: pending)
+  POST   /reschedule-requests/{id}/approve   Apply changes + mark approved
+  POST   /reschedule-requests/{id}/reject    Reject + leave appointment unchanged
+  GET    /reviews                List reviews by category (good/moderate/high_risk)
+  POST   /reviews/{id}/approve-reply         Approve AI-generated review reply
+  GET    /content/pending        List pending blog posts
+  POST   /content/{id}/approve   Approve blog post for publishing
+  POST   /content/{id}/reject    Reject blog post
+  GET    /notifications/pending  List pending notification campaigns
+  POST   /notifications/{id}/approve          Approve + send campaign emails
+  POST   /notifications/{id}/approve-and-send (alias for above)
+  GET    /audit-logs             View recent audit log entries
+
+ANALYTICS  (prefix: /api/analytics)  [requires admin role]
+  GET    /dashboard              Summary stats (users, appointments, reviews, agents)
+  GET    /agents                 Agent usage breakdown + average response times
+  GET    /appointments           Appointment metrics (by status, department)
+
+BLOG  (prefix: /api/blog)
+  GET    /posts                  List published blog posts
+  GET    /posts/{id}             Get single post
+  POST   /generate               [Admin/Doctor] Generate AI blog post via Agent 4
+  GET    /news                   Fetch latest health news (NewsAPI)
+
+DOCTORS  (prefix: /api/doctors)
+  GET    /                       List all doctors
+  GET    /{id}/slots             Get available appointment slots for a doctor
+
+HEALTH
+  GET    /health                 Service health check
+  GET    /                       API root info
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. FRONTEND PAGES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /                        Landing page
+  /login                   Login (JWT + Google OAuth button)
+  /register                Register new account
+  /blog                    Public blog listing
+
+  /dashboard               Patient area (requires login, role=patient)
+  /dashboard/chat          AI chatbot (sessions sidebar + RAG panel)
+  /dashboard/appointments  View/manage appointments + reschedule requests
+  /dashboard/profile       Edit profile
+
+  /doctor                  Doctor portal (requires role=doctor)
+                           View assigned appointments, update status
+
+  /admin                   Admin portal (requires role=admin)
+  /admin/users             User management
+  /admin/appointments      View + edit + delete all appointments
+  /admin/reschedule        Approve/reject reschedule requests
+  /admin/reviews           Review reply approval
+  /admin/content           Blog post approval queue
+  /admin/notifications     Notification campaign approval + send
+  /admin/analytics         Usage dashboard + agent metrics
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. EXTERNAL SERVICES & INTEGRATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SERVICE              STATUS         DESCRIPTION
+Anthropic Claude     ACTIVE         Sonnet 4.6 (agents) + Haiku 4.5 (classifier)
+Groq (fallback)      CONFIGURED     LLaMA-3.3-70b-versatile (optional alt LLM)
+Pinecone             MOCK ACTIVE    medical-rag index (483k PubMed vectors)
+                                    Real mode: needs PINECONE_API_KEY + BioBERT
+BioBERT              SUSPENDED      dmis-lab/biobert-base-cased-v1.2 (440MB)
+                                    Disabled to avoid startup overhead; re-enable
+                                    when ready to do real RAG
+Cross-Encoder        SUSPENDED      ms-marco-MiniLM-L-6-v2
+                                    Re-enabled automatically when BioBERT enabled
+AWS DynamoDB         CONFIGURED     Free tier; needs AWS_ACCESS_KEY_ID +
+                                    AWS_SECRET_ACCESS_KEY in .env
+PostgreSQL           ACTIVE         Runs in Docker (postgres service)
+Razorpay             MOCK ACTIVE    Payment orders + signature verification
+                                    Real mode: set RAZORPAY_KEY_ID + KEY_SECRET
+SMTP Email           MOCK ACTIVE    Appointment confirmations, no-show alerts,
+                                    notification campaigns — logs to console
+                                    Real mode: set SMTP_HOST/USER/PASSWORD
+NewsAPI              OPTIONAL       Health news for blog agent; set NEWS_API_KEY
+Google OAuth         OPTIONAL       Set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
+
+NOTE ON PINECONE / RAG:
+  Currently, "Source: PubMed" in responses is from the MOCK FALLBACK, not real
+  chunks. The mock returns generic text with doi="" and pmc_id="", causing the
+  citation builder to default to "Source: PubMed". RAG scores in the frontend
+  (0.900 / cross: 0.000) are hardcoded mock values. Real chunks would show
+  variable cosine similarity and non-zero cross-encoder scores.
+
+  To enable real RAG:
+    1. Set PINECONE_API_KEY in .env
+    2. Re-enable BioBERT warm-up in main.py (uncomment the warm-up call)
+    3. Rebuild: docker-compose up --build
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. AGENT DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MASTER AGENT (master_agent.py)
+  Role     : Intent classification + routing
+  LLM      : Claude Haiku 4.5 (fast, cheap)
+  Input    : User message + last 5 messages of chat history
+  Output   : Intent string → routes to sub-agent
+  Intents  : medical | appointment | reputation | content | notification | general
+  Special  : CRITICAL BOOKING RULE — short affirmatives ("yes", "ok", "book it")
+             after a medical/booking conversation are always classified as
+             "appointment" to avoid misrouting
+
+AGENT 1 — Medical Guidance (agent1_medical.py)
+  Role     : Answer medical questions with evidence-based responses
+  LLM      : Claude Sonnet 4.6
+  Tools    : query_medical_knowledge (RAG pipeline), check_emergency
+  RAG      : BioBERT → Pinecone → Cross-encoder → top-5 PubMed chunks
+  Output   : Citation-grounded response + rag_sources list for frontend panel
+  Max iter : 6 | Max tokens: 1024 | History: last 10 messages
+
+AGENT 2 — Appointment Booking (agent2_appointment.py)
+  Role     : Book appointments through conversational flow
+  LLM      : Claude Sonnet 4.6
+  Tools    : check_available_slots, create_appointment_booking,
+             process_mock_payment
+  Special  : Injects today's date so time references ("tomorrow") are correct
+  DB Write : chat.py extracts booking_data from intermediate steps and calls
+             crud.create_appointment() + crud.update_appointment_payment()
+  Max iter : 6 | Max tokens: 768
+
+AGENT 3 — Reputation Management (agent3_reputation.py)
+  Role     : Monitor reviews, generate AI replies, flag problematic content
+  LLM      : Claude Sonnet 4.6
+  Tools    : get_reviews, generate_reply, flag_review
+  Workflow : Negative reviews → AI reply → admin approves → posted
+             High-risk keywords → flag → admin review
+  Max tokens: 1024
+
+AGENT 4 — Content Generation (agent4_content.py)
+  Role     : Generate blog posts, social media content, website copy
+  LLM      : Claude Sonnet 4.6
+  Tools    : fetch_health_news, generate_blog_post, save_blog_post
+  Workflow : News → AI content → saved as draft → admin approves → published
+  Max tokens: 2048
+
+AGENT 5 — Drug/Treatment Notifications (agent5_notification.py)
+  Role     : Alert relevant patients about new treatments/drugs
+  LLM      : Claude Sonnet 4.6
+  Tools    : find_relevant_patients, generate_notification_email, create_campaign
+  Workflow : Doctor triggers → agent finds patients by disease keyword →
+             generates email template → creates campaign (pending) →
+             admin approves → bulk email sent in background
+  Max tokens: 1024
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. SECURITY & AUTH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Authentication   : JWT (HS256) — access token in Authorization: Bearer header
+Role System      : patient | doctor | admin
+Route Guards     : require_admin, require_doctor decorators on sensitive endpoints
+Audit Trail      : Every significant action logged to audit_logs table with
+                   user_id, action, resource, resource_id, timestamp
+Password Storage : bcrypt hashed (passlib)
+CORS             : Configured per ALLOWED_ORIGINS env var
+
+ROLE PERMISSIONS:
+  patient  → own appointments, chat, feedback, reschedule requests
+  doctor   → all patient appointments (read), update appointment status
+  admin    → everything + user management + approval queues + audit logs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. APPOINTMENT LIFECYCLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [Chat] Patient tells Agent 2 to book appointment
+      ↓
+  Agent 2 confirms details (department, date, time)
+      ↓
+  create_appointment_booking tool called → POST /api/appointments/book
+      ↓
+  Appointment created in DB (status=pending, payment_status=pending)
+      ↓
+  process_mock_payment tool called → Razorpay mock order + verification
+      ↓
+  Payment confirmed → status updated (payment_status=paid)
+      ↓
+  Confirmation email sent (SMTP / mock)
+      ↓
+  Patient wants to reschedule?
+      ↓
+  POST /api/appointments/{id}/reschedule → RescheduleRequest (status=pending)
+      ↓
+  Admin reviews at GET /api/admin/reschedule-requests
+      ↓
+  Admin approves → appointment updated → status=confirmed
+  Admin rejects → appointment unchanged → patient notified via admin_notes
+      ↓
+  Day of appointment: Doctor updates via PUT /api/appointments/{id}/status
+      → showed_up → status=completed
+      → no_show   → status=no_show + email sent to patient
+      → cancelled → status=cancelled
+      ↓
+  Patient submits feedback via POST /api/appointments/{id}/feedback (rating 1–5)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. ENVIRONMENT VARIABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VARIABLE                  REQUIRED  DESCRIPTION
+ANTHROPIC_API_KEY         YES       Claude Sonnet/Haiku for all agents
+GROQ_API_KEY              Optional  Alternative LLM (LLaMA-3.3-70b)
+PINECONE_API_KEY          YES*      Pinecone — medical-rag index
+                                    (*needed for real RAG; mock works without)
+SECRET_KEY                YES       JWT signing key (openssl rand -hex 32)
+DATABASE_URL              YES       PostgreSQL async URL
+AWS_ACCESS_KEY_ID         YES*      DynamoDB chat storage
+AWS_SECRET_ACCESS_KEY     YES*      (*chat works in-memory without it)
+AWS_REGION                Optional  Default: us-east-1
+RAZORPAY_KEY_ID           Optional  Real payments (mock active without)
+RAZORPAY_KEY_SECRET       Optional
+SMTP_HOST                 Optional  Real email (mock logs to console without)
+SMTP_USER                 Optional
+SMTP_PASSWORD             Optional
+NEWS_API_KEY              Optional  NewsAPI for blog content generation
+GOOGLE_CLIENT_ID          Optional  Google OAuth
+GOOGLE_CLIENT_SECRET      Optional
+ALLOWED_ORIGINS           Optional  CORS origins list
+DEBUG                     Optional  true → DEBUG log level + RAG chunk logging
+APP_VERSION               Optional  Default: 1.0.0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. WHAT IS WORKING (COMPLETED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BACKEND
+  [x] FastAPI app with Docker Compose setup
+  [x] JWT authentication (register, login, refresh, Google OAuth hook)
+  [x] Role-based access control (patient / doctor / admin)
+  [x] All 5 LangChain agents (Pydantic v2 + Claude 4.x output normalisation fixed)
+  [x] MasterAgent intent classification with CRITICAL BOOKING RULE
+  [x] Singleton agent executor pattern (no per-request rebuild cost)
+  [x] Agent 1: Medical RAG pipeline (BioBERT suspended, mock fallback active)
+  [x] Agent 2: Appointment booking with correct date injection + DB persistence
+  [x] Agent 3: Review management + AI reply generation
+  [x] Agent 4: Blog/social content generation via NewsAPI
+  [x] Agent 5: Patient notification campaigns (pending admin approval)
+  [x] Appointment booking, payment (mock Razorpay), confirmation email (mock SMTP)
+  [x] Reschedule request workflow (patient submits → admin approves/rejects)
+  [x] Admin appointment edit + delete
+  [x] Blog post approval queue (pending → approved → published)
+  [x] Notification campaign approval + bulk email send
+  [x] Review reply approval system
+  [x] AWS DynamoDB chat session + message persistence (graceful fallback if no creds)
+  [x] 5-day rolling memory summaries (PostgreSQL daily_summaries)
+  [x] In-process session memory for fast context retrieval
+  [x] Full audit logging on all significant actions
+  [x] RAG source visibility (rag_sources in ChatResponse)
+  [x] Analytics endpoints (dashboard stats, agent usage, appointment metrics)
+  [x] Doctor list + availability slot endpoints
+
+FRONTEND
+  [x] Next.js 14 App Router with TypeScript + Tailwind CSS
+  [x] Login / Register pages
+  [x] Landing page + public blog listing
+  [x] Patient dashboard with AI chat interface
+  [x] Sessions sidebar (list, switch, delete, new chat)
+  [x] Collapsible RAG sources panel under AI medical responses
+  [x] Admin panel (users, appointments, reviews, content, notifications)
+  [x] Doctor portal page
+  [x] Role-based routing on login
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. PENDING / NOT YET DELIVERED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HIGH PRIORITY
+  [ ] Real Pinecone RAG — set PINECONE_API_KEY + re-enable BioBERT in main.py
+  [ ] AWS DynamoDB credentials — add to .env for persistent chat history
+  [ ] Frontend: Patient reschedule request submission page
+        Backend endpoint exists (POST /api/appointments/{id}/reschedule)
+        No UI built yet
+  [ ] Frontend: Admin reschedule approval panel
+        Backend endpoints exist (GET/POST /api/admin/reschedule-requests/*)
+        No UI built yet
+
+MEDIUM PRIORITY
+  [ ] Wire crud.save_symptoms() after Agent 1 responds
+        (symptom records not saved to symptoms table currently)
+  [ ] Real doctor slot management
+        Currently GET /api/doctors/{id}/slots returns mock slots
+        Need real doctor schedule model + availability DB table
+  [ ] Session rename (PATCH /api/chat/sessions/{id})
+  [ ] Frontend: Appointments tab in patient dashboard
+        (view appointments, cancel, submit reschedule request)
+
+LOW PRIORITY / OPTIONAL
+  [ ] Real SMTP — set SMTP_HOST/USER/PASSWORD in .env
+  [ ] Real Razorpay — set RAZORPAY_KEY_ID + KEY_SECRET in .env
+  [ ] Real NewsAPI — set NEWS_API_KEY in .env
+  [ ] Google OAuth complete wiring (GOOGLE_CLIENT_ID/SECRET)
+  [ ] DynamoDB TTL for auto-expiry of old chat messages
+  [ ] Session export as PDF
+  [ ] Push notifications (in addition to email)
+  [ ] Patient-facing medical report generation (PDF)
+  [ ] Multi-language support
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. HOW TO RUN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # 1. Copy env template and fill in the required keys
+  cp .env.example .env
+  # Minimum required: ANTHROPIC_API_KEY, SECRET_KEY, DATABASE_URL
+
+  # 2. Start with Docker
+  docker-compose up --build
+
+  # Frontend : http://localhost:3000
+  # Backend  : http://localhost:8000
+  # API docs : http://localhost:8000/docs
+
+  Default admin login: username=admin | password=Admin@123
+
+  # View PostgreSQL data
+  Open http://localhost:5050 (pgAdmin)
+  Host: postgres (Docker service name — NOT localhost)
+  Port: 5432
+  DB: healthcareai
+  User/Pass: from DATABASE_URL in .env
+

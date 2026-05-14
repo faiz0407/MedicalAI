@@ -1,0 +1,39 @@
+# Environment secrets — NEVER commit these
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# HuggingFace model cache (large, re-downloadable)
+.cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+.next/
+frontend-next/.next/
+
+# Claude Code project memory (local only)
+.claude/
+
+# Docker volumes
+postgres_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

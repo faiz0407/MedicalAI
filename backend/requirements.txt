@@ -1,0 +1,49 @@
+# ── Web Framework ────────────────────────────────────────────────────────────
+fastapi==0.115.4
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# ── Database ─────────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# ── Authentication ───────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# ── LangChain + Groq ─────────────────────────────────────────────────────────
+langchain==0.3.25
+langchain-core>=0.3.65,<0.4.0
+langchain-groq==0.2.3
+langchain-community==0.3.25
+groq>=0.9.0
+
+# ── Pinecone ─────────────────────────────────────────────────────────────────
+pinecone-client==5.0.1
+
+# ── BioBERT Embeddings (local, no API key required) ──────────────────────────
+# sentence-transformers loads dmis-lab/biobert-base-cased-v1.2 from HuggingFace.
+# First run downloads ~440 MB to ~/.cache/huggingface/hub (cached afterwards).
+sentence-transformers==3.3.1
+torch==2.5.1               # CPU build — remove +cpu suffix if you have CUDA
+transformers==4.46.3
+huggingface-hub==0.26.2
+
+# ── Config ───────────────────────────────────────────────────────────────────
+pydantic==2.9.2
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+
+# ── AWS DynamoDB ─────────────────────────────────────────────────────────────
+boto3==1.35.36
+
+# ── Payment ──────────────────────────────────────────────────────────────────
+razorpay==1.4.2
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+httpx==0.27.2
+aiofiles==24.1.0
+email-validator==2.2.0
