@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \
     --trusted-host download.pytorch.org \
-    torch==2.5.1+cpu \
+    torch==2.5.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Install remaining dependencies (torch already satisfied above)
