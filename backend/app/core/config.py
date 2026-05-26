@@ -84,12 +84,7 @@ class Settings(BaseSettings):
     FACEBOOK_PAGE_ACCESS_TOKEN: str = ""
 
     # ─── CORS ─────────────────────────────────────────────────────────
-    ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-    ]
+    ALLOWED_ORIGINS: List[str] = ["*"]
 
     # ─── Memory ───────────────────────────────────────────────────────
     ROLLING_SUMMARY_DAYS: int = 5

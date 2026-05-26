@@ -78,7 +78,10 @@ app = FastAPI(
 # ─── CORS ────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://medical-ai-indol.vercel.app",  # replace if your Vercel URL differs
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
